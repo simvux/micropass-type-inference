@@ -1,0 +1,11 @@
+[package]
+name = "backtracked-micropass-type-inference"
+version = "0.1.0"
+edition = "2024"
+author = "simvux"
+
+[dependencies]
+log = "0.4.29"
+
+[dev-dependencies]
+simple_logger = { version = "5.2.0", features = ["colored", "colors"], default-features = false }
