@@ -35,8 +35,16 @@ impl<'a> Checker<'a> {
 
     /// Type check known types to generate the final error messages.
     pub fn type_check(&mut self) -> Vec<Error> {
+        for appl in self.env.applications.keys() {
+            self.type_check_application(appl);
+        }
+
+        for assignment in self.env.assignments.iter() {
+            self.type_check_assignment(*assignment);
+        }
+
         for var in self.env.vars() {
-            self.type_check_var(var);
+            self.type_check_fields(var);
         }
 
         for (sameas_key, sameas_unification) in self.env.same_as_unifications.iter() {
@@ -47,10 +55,10 @@ impl<'a> Checker<'a> {
 
                 if *expected != *given {
                     let message = match sameas_unification.main {
-                        SameasMain::List { .. } => {
+                        inf::SameasMain::List { .. } => {
                             "type must be same as the other types of this list"
                         }
-                        SameasMain::ExpressionBranch(_) => {
+                        inf::SameasMain::JoinExpression(_) => {
                             "type must be same as the other branches of this expression"
                         }
                     };
@@ -63,27 +71,14 @@ impl<'a> Checker<'a> {
         std::mem::take(&mut self.errors)
     }
 
-    fn type_check_var(&mut self, var: VariableKey) {
-        let variable = &self.env.variables[var];
-
-        for appl in &variable.applied_by {
-            self.type_check_application(var, *appl);
-        }
-
-        for dst in &variable.assigned_to {
-            self.type_check_assignments(*dst, var);
-        }
-
-        if !variable.has_fields.is_empty() {
-            self.type_check_fields(var);
-        }
-    }
-
-    fn type_check_application(&mut self, var: VariableKey, appl: ApplicationKey) {
+    fn type_check_application(&mut self, appl: ApplicationKey) {
         let appl = &self.env.applications[appl];
+        let func = appl.func;
 
-        let KnownType::Function { params, ret } = &self.assignments[var] else {
-            self.err(Error::NonFunctionApplication(self.assignments[var].clone()));
+        let KnownType::Function { params, ret } = &self.assignments[func] else {
+            self.err(Error::NonFunctionApplication(
+                self.assignments[func].clone(),
+            ));
             return;
         };
 
@@ -112,8 +107,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn type_check_assignments(&mut self, dst: VariableKey, var: VariableKey) {
-        let [expected, given] = [dst, var].map(|var| &self.assignments[var]);
+    fn type_check_assignment(&mut self, assgn: inf::Assignment) {
+        let [expected, given] = [assgn.lhs, assgn.rhs].map(|var| &self.assignments[var]);
         if expected != given {
             self.err_type_mismatch(expected, given, "can not be assigned to this type");
         }
@@ -121,10 +116,14 @@ impl<'a> Checker<'a> {
 
     fn type_check_fields(&mut self, var: VariableKey) {
         let variable = &self.env.variables[var];
+        if variable.has_fields.is_empty() {
+            return;
+        }
+
         let type_ = &self.assignments[var];
 
         let KnownType::Record(name, forall) = type_ else {
-            let fields = variable.has_fields.keys().copied().collect();
+            let fields = variable.has_fields.iter().map(|f| f.name).collect();
             self.err(Error::DoesNotHaveFields(type_.clone(), fields));
             return;
         };
@@ -133,10 +132,10 @@ impl<'a> Checker<'a> {
             .has_fields
             .iter()
             .filter_map(
-                |(field, field_var)| match record::type_of_field(*name, *field) {
+                |has_field| match record::type_of_field(*name, has_field.name) {
                     Ok(record_field_type) => {
                         let expected = const_instantiate(forall, &record_field_type);
-                        let given = &self.assignments[*field_var];
+                        let given = &self.assignments[has_field.field_type];
 
                         if expected != *given {
                             self.err_type_mismatch(&expected, given, format!("field of {name}"));

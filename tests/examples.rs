@@ -17,12 +17,14 @@ fn process(mut env: Environment, expected_errors: Vec<Error>) -> Map<VariableKey
     let mut fail = false;
 
     for err in &errors {
+        #[cfg(debug_assertions)]
         eprintln!("{err}");
         fail |= !expected_errors.contains(&err);
     }
 
     for err in expected_errors {
         if !errors.contains(&err) {
+            #[cfg(debug_assertions)]
             eprintln!("missing error:\n{err}");
             fail = true;
         }
@@ -37,10 +39,12 @@ fn process(mut env: Environment, expected_errors: Vec<Error>) -> Map<VariableKey
 
 fn logger() {
     LOGGER.call_once(|| {
-        SimpleLogger::new()
-            .with_level(log::LevelFilter::Info)
-            .init()
-            .unwrap();
+        #[cfg(debug_assertions)]
+        let level = log::LevelFilter::Info;
+        #[cfg(not(debug_assertions))]
+        let level = log::LevelFilter::Error;
+
+        SimpleLogger::new().with_level(level).init().unwrap();
     });
 }
 
@@ -236,4 +240,81 @@ fn defaulting() {
     assert_eq!(assignments[y], T::generic("b"));
     assert_eq!(assignments[n], T::default_int());
     assert_eq!(assignments[z], T::default_unit_type());
+}
+
+#[test]
+fn exemplatory() {
+    logger();
+    let mut env = Environment::new();
+
+    let v0 = env.unknown();
+    let v1 = env.unknown();
+    env.leave_signature_enter_expression();
+
+    // let _ = if something() { v0 } else { v1 }
+    let _implied_same = {
+        let (same_as, expr) = env.expr_sameas();
+        env.add_sameas_member(same_as, v0);
+        env.add_sameas_member(same_as, v1);
+        expr
+    };
+
+    // let _ = [v1, get_string()];
+    //   where
+    //     fn get_string() -> string {...}
+    let _implied_string = {
+        let (same_as, list, _) = env.list_sameas();
+        env.add_sameas_member(same_as, v0);
+        let get_string = {
+            let string = env.string();
+            let func = env.function(vec![], string);
+
+            let application = env.apply(func);
+            env.get_return_type(application)
+        };
+        env.add_sameas_member(same_as, get_string);
+        list
+    };
+
+    // let paired: (i32, i32) = (v0, v0);
+    let _paired = {
+        let i32 = env.i(32);
+        let lhs = env.tuple(vec![i32, i32]);
+
+        let rhs = env.tuple(vec![v0, v0]);
+        env.assign(rhs, lhs);
+
+        lhs
+    };
+
+    let expected_return_type = env.i(32);
+    env.assign(v0, expected_return_type);
+
+    process(
+        env,
+        vec![Error::Mismatch {
+            expected: T::i(32),
+            given: T::string(),
+            message: "type must be same as the other types of this list".into(),
+        }],
+    );
+}
+
+#[test]
+#[ignore]
+fn bench() {
+    let time = std::time::Instant::now();
+    for _ in 0..50000 {
+        defaulting();
+        list();
+        if_expr();
+        field_inference();
+        exemplatory();
+        static_function_application();
+        generic_function_application();
+    }
+
+    println!("took {:#?}", time.elapsed());
+
+    panic!();
 }

@@ -15,7 +15,7 @@ In this implementation the supported features are
 - Rank-1 Parametric Polymorphism
 - Type Level Parametric Polymorphism
 - First Class Functions
-- 'Same As' grouping where >2 values should all match in type
+- 'Same As' grouping where N values should all match in type
 - Inference of product types by their fields
 - Integer type placeholders
 

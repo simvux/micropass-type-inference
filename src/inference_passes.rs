@@ -1,5 +1,38 @@
-use super::{Environment, GenericName, VariableInfo, VariableKey, VariableSource, record};
+use super::{
+    ApplicationKey, Environment, GenericName, VariableInfo, VariableKey, VariableSource, record,
+};
 use std::ops::RangeTo;
+
+#[derive(Clone)]
+pub(crate) struct Application {
+    pub(crate) func: VariableKey,
+    pub(crate) parameters: Vec<VariableKey>,
+    pub(crate) ret: VariableKey,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Assignment {
+    pub(crate) lhs: VariableKey,
+    pub(crate) rhs: VariableKey,
+}
+
+#[derive(Clone)]
+pub(crate) struct SameasUnification {
+    pub(crate) main: SameasMain,
+    pub(crate) members: Vec<VariableKey>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SameasMain {
+    List { elem: VariableKey },
+    JoinExpression(VariableKey),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HasField {
+    pub(crate) name: record::Field,
+    pub(crate) field_type: VariableKey,
+}
 
 type Pass = usize;
 
@@ -80,23 +113,23 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     fn known_applications(&mut self) {
-        for var in self.env.vars() {
-            let Some((parameters, _)) = self.env.as_function_cloned(var) else {
+        for appl_key in self.env.applications.keys() {
+            let appl = &self.env.applications[appl_key];
+
+            let Some((parameters, _)) = self.env.as_function_cloned(appl.func) else {
                 // Ignore applications against unknown functions as they may become known later
                 continue;
             };
 
-            for (appl_key, appl) in self.env.get_applications(var) {
-                if parameters.len() != appl.parameters.len() {
-                    // To prevent us accidentally ruining this functions inference by
-                    // unifying it with an invalid instantiation, we will skip this one.
-                    log::info!("parameter length differs, skipping {appl_key:?}");
-                    continue;
-                }
+            if parameters.len() != appl.parameters.len() {
+                // To prevent us accidentally ruining this functions inference by
+                // unifying it with an invalid instantiation, we will skip this one.
+                log::info!("parameter length differs, skipping {appl_key:?}");
+                continue;
+            }
 
-                for (expected, given) in parameters.iter().zip(appl.parameters) {
-                    self.unify(*expected, given);
-                }
+            for (expected, given) in parameters.iter().zip(appl.parameters.clone()) {
+                self.unify(*expected, given);
             }
         }
 
@@ -104,24 +137,24 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     fn known_assignments(&mut self) {
-        for var in self.env.vars() {
-            for assigned in self.env.get_assignments(var) {
-                self.unify(assigned, var);
-            }
+        for i in 0..self.env.assignments.len() {
+            let check = self.env.assignments[i];
+            self.unify(check.lhs, check.rhs);
         }
 
         self.perform(..KNOWN_ASSIGNMENTS);
     }
 
     fn known_return_types(&mut self) {
-        for var in self.env.vars() {
-            let Some((_, ret)) = self.env.as_function(var) else {
+        for appl_key in self.env.applications.keys() {
+            let appl = &self.env.applications[appl_key];
+
+            let Some((_, ret)) = self.env.as_function(appl.func) else {
+                // Ignore applications against unknown functions as they may become known later
                 continue;
             };
 
-            for (_, appl) in self.env.get_applications(var) {
-                self.unify(ret, appl.ret);
-            }
+            self.unify(ret, appl.ret);
         }
 
         self.perform(..KNOWN_RETURN_TYPES);
@@ -148,14 +181,15 @@ impl<'a> InferenceUnifier<'a> {
             let name = *name;
             let params = params.clone();
 
-            for (field_name, field_var) in self.env.get_fields(var) {
-                match record::type_of_field(name, field_name) {
+            for has_field in self.env.get_fields(var) {
+                match record::type_of_field(name, has_field.name) {
                     Ok(ty) => {
                         let expected = self.env.instantiate(&params, &ty);
                         log::info!(
-                            "checking the field assignment {field_var} against instantiated field {expected}"
+                            "checking the field assignment {} against instantiated field {expected}",
+                            has_field.field_type
                         );
-                        self.unify(expected, field_var);
+                        self.unify(expected, has_field.field_type);
                     }
                     Err(record::Error::RecordNotFound(_) | record::Error::FieldNotFound(_)) => {
                         break;
@@ -179,7 +213,8 @@ impl<'a> InferenceUnifier<'a> {
                 continue;
             }
 
-            if let Some(name) = record::guess_by_fields(&var_data.has_fields) {
+            if let Some(name) = record::guess_by_fields(var_data.has_fields.iter().map(|f| f.name))
+            {
                 log::info!("inferring {var} to be {name} because of its fields");
                 let params = record::type_parameters(name, |_| self.env.unknown()).unwrap();
                 self.env.variables[var].info = VariableInfo::Record(name, params);
@@ -190,24 +225,25 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     fn less_known_functions(&mut self) {
-        for var in self.env.vars() {
-            let is_applied = self.env.variables[var].applied_by.len() > 0;
+        for appl in self.env.applications.keys() {
+            let func = self.env.applications[appl].func;
 
-            match &self.env.variables[var].info {
+            match &self.env.variables[func].info {
                 VariableInfo::Function { .. } => {}
                 // If it's applied as a function but its type isn't known, then we assume it *is* a
                 // function and infer it into a function.
-                VariableInfo::Unknown if is_applied => {
-                    log::info!("inferring {var} to be function");
+                VariableInfo::Unknown => {
+                    log::info!("inferring {func} to be function");
 
                     // Use the types from the first time the function is applied
-                    let first_application_key = self.env.variables[var].applied_by[0];
-                    let first_application = self.env.applications[first_application_key].clone();
+                    let first = &self.env.applications[ApplicationKey(0)];
 
-                    self.env.variables[var].info = VariableInfo::Function {
-                        params: first_application.parameters,
-                        ret: first_application.ret,
+                    let info = VariableInfo::Function {
+                        params: first.parameters.clone(),
+                        ret: first.ret,
                     };
+
+                    self.env.variables[func].info = info
                 }
                 _ => {}
             }

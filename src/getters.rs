@@ -1,10 +1,6 @@
 //! Helper methods for iterating and getting information from a type environment
 
-use super::{
-    Application, ApplicationKey, Environment, SameasMain, SameasUnificationKey, VariableInfo,
-    VariableKey, record,
-};
-use std::collections::HashMap;
+use super::{Environment, SameasUnificationKey, VariableInfo, VariableKey, inf};
 
 impl Environment {
     pub(crate) fn vars(&self) -> impl Iterator<Item = VariableKey> + 'static {
@@ -13,28 +9,16 @@ impl Environment {
 
     pub(crate) fn expected_of_sameas(&self, sameas_key: SameasUnificationKey) -> VariableKey {
         match self.same_as_unifications[sameas_key].main {
-            SameasMain::List { elem, .. } => elem,
-            SameasMain::ExpressionBranch(var) => var,
+            inf::SameasMain::List { elem, .. } => elem,
+            inf::SameasMain::JoinExpression(var) => var,
         }
-    }
-
-    pub(crate) fn get_applications(&self, func: VariableKey) -> Vec<(ApplicationKey, Application)> {
-        self.variables[func]
-            .applied_by
-            .iter()
-            .map(|appl| (*appl, self.applications[*appl].clone()))
-            .collect()
     }
 
     pub(crate) fn get_members(&self, sameas: SameasUnificationKey) -> Vec<VariableKey> {
         self.same_as_unifications[sameas].members.clone()
     }
 
-    pub(crate) fn get_assignments(&self, var: VariableKey) -> Vec<VariableKey> {
-        self.variables[var].assigned_to.clone()
-    }
-
-    pub(crate) fn get_fields(&self, var: VariableKey) -> HashMap<record::Field, VariableKey> {
+    pub(crate) fn get_fields(&self, var: VariableKey) -> Vec<inf::HasField> {
         self.variables[var].has_fields.clone()
     }
 

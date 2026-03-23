@@ -10,6 +10,7 @@ mod vecmap;
 
 pub use checker::{Checker, Error};
 pub use finalize::Finalizer;
+use inference_passes as inf;
 pub use inference_passes::InferenceUnifier;
 use instantiate::const_instantiate;
 use std::fmt;
@@ -34,8 +35,9 @@ pub struct Environment {
     variables: Map<VariableKey, Variable>,
     generics: HashSet<GenericName>,
 
-    applications: Map<ApplicationKey, Application>,
-    same_as_unifications: Map<SameasUnificationKey, SameasUnification>,
+    applications: Map<ApplicationKey, inf::Application>,
+    assignments: Vec<inf::Assignment>,
+    same_as_unifications: Map<SameasUnificationKey, inf::SameasUnification>,
 
     current_source: VariableSource,
 }
@@ -43,11 +45,7 @@ pub struct Environment {
 #[derive(Debug)]
 struct Variable {
     info: VariableInfo,
-
-    applied_by: Vec<ApplicationKey>,
-    assigned_to: Vec<VariableKey>,
-    has_fields: HashMap<record::Field, VariableKey>,
-
+    has_fields: Vec<inf::HasField>,
     source: VariableSource,
 }
 
@@ -55,32 +53,10 @@ impl Variable {
     fn new(source: VariableSource, info: VariableInfo) -> Self {
         Self {
             info,
-            applied_by: vec![],
-            assigned_to: vec![],
-            has_fields: HashMap::new(),
-
+            has_fields: vec![],
             source,
         }
     }
-}
-
-#[derive(Clone)]
-struct Application {
-    parameters: Vec<VariableKey>,
-    ret: VariableKey,
-}
-
-struct SameasUnification {
-    main: SameasMain,
-    members: Vec<VariableKey>,
-}
-
-enum SameasMain {
-    // All members must be identical and yield the type parameter of List
-    List { elem: VariableKey },
-
-    // All members must be identical and yield the Main
-    ExpressionBranch(VariableKey),
 }
 
 /// The incomplete information we may hold of this variables inferred type
@@ -203,6 +179,7 @@ impl Environment {
 
             same_as_unifications: Map::new(),
             applications: Map::new(),
+            assignments: vec![],
 
             current_source: VariableSource::Signature,
         }
@@ -263,8 +240,8 @@ impl Environment {
     pub fn list_sameas(&mut self) -> (SameasUnificationKey, VariableKey, VariableKey) {
         let elem = self.unknown();
         let var = self.list(elem);
-        let key = self.same_as_unifications.push(SameasUnification {
-            main: SameasMain::List { elem },
+        let key = self.same_as_unifications.push(inf::SameasUnification {
+            main: inf::SameasMain::List { elem },
             members: vec![],
         });
         (key, var, elem)
@@ -274,8 +251,8 @@ impl Environment {
     /// expression.
     pub fn expr_sameas(&mut self) -> (SameasUnificationKey, VariableKey) {
         let var = self.unknown();
-        let key = self.same_as_unifications.push(SameasUnification {
-            main: SameasMain::ExpressionBranch(var),
+        let key = self.same_as_unifications.push(inf::SameasUnification {
+            main: inf::SameasMain::JoinExpression(var),
             members: vec![],
         });
         (key, var)
@@ -287,7 +264,9 @@ impl Environment {
 
     pub fn add_field(&mut self, var: VariableKey, name: record::Field) -> VariableKey {
         let field_type = self.unknown();
-        self.variables[var].has_fields.insert(name, field_type);
+        self.variables[var]
+            .has_fields
+            .push(inf::HasField { name, field_type });
         field_type
     }
 
@@ -326,12 +305,11 @@ impl Environment {
             _ => self.unknown(),
         };
 
-        let appl = self.applications.push(Application {
+        let appl = self.applications.push(inf::Application {
+            func,
             parameters: vec![],
             ret,
         });
-
-        self.variables[func].applied_by.push(appl);
 
         appl
     }
@@ -343,7 +321,10 @@ impl Environment {
     }
 
     pub fn assign(&mut self, src: VariableKey, target: VariableKey) {
-        self.variables[src].assigned_to.push(target);
+        self.assignments.push(inf::Assignment {
+            lhs: target,
+            rhs: src,
+        });
     }
 
     /// Get the return type of a function application.

@@ -35,21 +35,29 @@ pub fn type_of_field(name: Name, field: Field) -> Result<KnownType, Error> {
 }
 
 /// For illustrative purposes we oversimplify name resolution
-pub fn guess_by_fields<T>(fields: &HashMap<Field, T>) -> Option<Name> {
+pub fn guess_by_fields<I>(fields: I) -> Option<Name>
+where
+    I: Iterator<Item = Field> + Clone,
+{
+    let fields = fields.into_iter();
+
     if ["first", "second"]
         .iter()
-        .any(|name| fields.contains_key(*name))
+        .any(|name| fields.clone().any(|n| n == *name))
     {
         return Some("Pair");
     }
 
-    if ["x", "y"].iter().any(|name| fields.contains_key(*name)) {
+    if ["x", "y"]
+        .iter()
+        .any(|name| fields.clone().any(|n| n == *name))
+    {
         return Some("Point");
     }
 
     if ["id", "label", "value"]
         .iter()
-        .any(|name| fields.contains_key(*name))
+        .any(|name| fields.clone().any(|n| n == *name))
     {
         return Some("Labeled");
     }
