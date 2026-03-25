@@ -243,6 +243,7 @@ impl Environment {
         let key = self.same_as_unifications.push(inf::SameasUnification {
             main: inf::SameasMain::List { elem },
             members: vec![],
+            satisfied: false,
         });
         (key, var, elem)
     }
@@ -254,6 +255,7 @@ impl Environment {
         let key = self.same_as_unifications.push(inf::SameasUnification {
             main: inf::SameasMain::JoinExpression(var),
             members: vec![],
+            satisfied: false,
         });
         (key, var)
     }
@@ -309,6 +311,7 @@ impl Environment {
             func,
             parameters: vec![],
             ret,
+            satisfied: false,
         });
 
         appl
@@ -324,6 +327,7 @@ impl Environment {
         self.assignments.push(inf::Assignment {
             lhs: target,
             rhs: src,
+            satisfied: false,
         });
     }
 

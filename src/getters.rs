@@ -1,6 +1,6 @@
 //! Helper methods for iterating and getting information from a type environment
 
-use super::{Environment, SameasUnificationKey, VariableInfo, VariableKey, inf};
+use super::{Environment, Forall, SameasUnificationKey, VariableInfo, VariableKey, inf, record};
 
 impl Environment {
     pub(crate) fn vars(&self) -> impl Iterator<Item = VariableKey> + 'static {
@@ -35,6 +35,16 @@ impl Environment {
     ) -> Option<(Vec<VariableKey>, VariableKey)> {
         match &self.variables[var].info {
             VariableInfo::Function { params, ret } => Some((params.to_vec(), *ret)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_record_cloned(
+        &self,
+        var: VariableKey,
+    ) -> Option<(record::Name, Forall<VariableKey>)> {
+        match &self.variables[var].info {
+            VariableInfo::Record(name, params) => Some((name, params.clone())),
             _ => None,
         }
     }

@@ -8,18 +8,21 @@ pub(crate) struct Application {
     pub(crate) func: VariableKey,
     pub(crate) parameters: Vec<VariableKey>,
     pub(crate) ret: VariableKey,
+    pub(crate) satisfied: bool,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct Assignment {
     pub(crate) lhs: VariableKey,
     pub(crate) rhs: VariableKey,
+    pub(crate) satisfied: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct SameasUnification {
     pub(crate) main: SameasMain,
     pub(crate) members: Vec<VariableKey>,
+    pub(crate) satisfied: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -78,16 +81,24 @@ const ALL_PASSES: RangeTo<Pass> = ..DEFAULT_UNKNOWNS_TO_UNIT_OR_LIFT + 1;
 /// Once all passes have gotten the chance to run, all types are expected to have been inferred.
 pub struct InferenceUnifier<'a> {
     env: &'a mut Environment,
+    encountered_uninferred: bool,
 }
 
 impl<'a> InferenceUnifier<'a> {
     pub fn new(env: &'a mut Environment) -> Self {
-        Self { env }
+        Self {
+            env,
+            encountered_uninferred: false,
+        }
     }
 
     /// Perform complete type inference
     pub fn infer(&mut self) {
         self.perform(ALL_PASSES);
+    }
+
+    pub fn reset_and_is_satisfied(&mut self) -> bool {
+        !std::mem::take(&mut self.encountered_uninferred)
     }
 
     fn perform(&mut self, passes: RangeTo<Pass>) {
@@ -114,7 +125,13 @@ impl<'a> InferenceUnifier<'a> {
 
     fn known_applications(&mut self) {
         for appl_key in self.env.applications.keys() {
+            assert!(!self.encountered_uninferred);
+
             let appl = &self.env.applications[appl_key];
+
+            if appl.satisfied {
+                continue;
+            }
 
             let Some((parameters, _)) = self.env.as_function_cloned(appl.func) else {
                 // Ignore applications against unknown functions as they may become known later
@@ -131,6 +148,8 @@ impl<'a> InferenceUnifier<'a> {
             for (expected, given) in parameters.iter().zip(appl.parameters.clone()) {
                 self.unify(*expected, given);
             }
+
+            self.env.applications[appl_key].satisfied = self.reset_and_is_satisfied();
         }
 
         self.perform(..KNOWN_APPLICATIONS);
@@ -140,6 +159,8 @@ impl<'a> InferenceUnifier<'a> {
         for i in 0..self.env.assignments.len() {
             let check = self.env.assignments[i];
             self.unify(check.lhs, check.rhs);
+
+            self.env.assignments[i].satisfied = self.reset_and_is_satisfied();
         }
 
         self.perform(..KNOWN_ASSIGNMENTS);
@@ -155,6 +176,8 @@ impl<'a> InferenceUnifier<'a> {
             };
 
             self.unify(ret, appl.ret);
+
+            self.env.applications[appl_key].satisfied = self.reset_and_is_satisfied();
         }
 
         self.perform(..KNOWN_RETURN_TYPES);
@@ -167,6 +190,8 @@ impl<'a> InferenceUnifier<'a> {
             for given in self.env.get_members(sameas_key) {
                 self.unify(expected, given);
             }
+
+            self.env.same_as_unifications[sameas_key].satisfied = self.reset_and_is_satisfied();
         }
 
         self.perform(..KNOWN_SAME_AS_UNIFICATIONS)
@@ -174,12 +199,9 @@ impl<'a> InferenceUnifier<'a> {
 
     fn known_record_fields(&mut self) {
         for var in self.env.vars() {
-            let VariableInfo::Record(name, params) = &self.env.variables[var].info else {
+            let Some((name, params)) = self.env.as_record_cloned(var) else {
                 continue;
             };
-
-            let name = *name;
-            let params = params.clone();
 
             for has_field in self.env.get_fields(var) {
                 match record::type_of_field(name, has_field.name) {
@@ -247,6 +269,8 @@ impl<'a> InferenceUnifier<'a> {
                 }
                 _ => {}
             }
+
+            self.reset_and_is_satisfied();
         }
 
         self.perform(..LESS_KNOWN_FUNCTIONS)
@@ -343,13 +367,15 @@ impl<'a> InferenceUnifier<'a> {
                 }
                 self.unify(exp_ret, ret);
             }
-            [VariableInfo::Numeric, VariableInfo::Numeric] => {}
+            [VariableInfo::Numeric, VariableInfo::Numeric] => self.encountered_uninferred = true,
             [VariableInfo::Numeric, VariableInfo::Int(size)] => {
                 log::info!("inferring {expected} to be {size}");
+                self.encountered_uninferred = true;
                 exp_data.info = VariableInfo::Int(*size);
             }
             [VariableInfo::Int(size), VariableInfo::Numeric] => {
                 log::info!("inferring {given} to be {size}");
+                self.encountered_uninferred = true;
                 given_data.info = VariableInfo::Int(*size);
             }
             [
@@ -372,7 +398,7 @@ impl<'a> InferenceUnifier<'a> {
             }
 
             // These may become known later, so let's leave it for now
-            [VariableInfo::Unknown, VariableInfo::Unknown] => {}
+            [VariableInfo::Unknown, VariableInfo::Unknown] => self.encountered_uninferred = true,
 
             [VariableInfo::Unknown, _] => self.infer_directly(expected, given),
             [_, VariableInfo::Unknown] => self.infer_directly(given, expected),
@@ -390,6 +416,7 @@ impl<'a> InferenceUnifier<'a> {
 
     fn infer_directly(&mut self, unknown: VariableKey, known: VariableKey) {
         log::info!("inferring {unknown} =-> {known}");
+        self.encountered_uninferred = true;
 
         assert!(matches!(
             self.env.variables[unknown].info,
