@@ -18,10 +18,6 @@ impl Environment {
         self.same_as_unifications[sameas].members.clone()
     }
 
-    pub(crate) fn get_fields(&self, var: VariableKey) -> Vec<inf::HasField> {
-        self.variables[var].has_fields.clone()
-    }
-
     pub(crate) fn as_function(&self, var: VariableKey) -> Option<(&[VariableKey], VariableKey)> {
         match &self.variables[var].info {
             VariableInfo::Function { params, ret } => Some((params, *ret)),

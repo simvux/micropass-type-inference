@@ -1,6 +1,7 @@
 use super::{
     ApplicationKey, Environment, GenericName, VariableInfo, VariableKey, VariableSource, record,
 };
+use log::{info, trace};
 use std::ops::RangeTo;
 
 #[derive(Clone)]
@@ -35,6 +36,8 @@ pub(crate) enum SameasMain {
 pub(crate) struct HasField {
     pub(crate) name: record::Field,
     pub(crate) field_type: VariableKey,
+    pub(crate) instantiated_field_type: Option<VariableKey>,
+    pub(crate) satisfied: bool,
 }
 
 type Pass = usize;
@@ -81,14 +84,20 @@ const ALL_PASSES: RangeTo<Pass> = ..DEFAULT_UNKNOWNS_TO_UNIT_OR_LIFT + 1;
 /// Once all passes have gotten the chance to run, all types are expected to have been inferred.
 pub struct InferenceUnifier<'a> {
     env: &'a mut Environment,
-    encountered_uninferred: bool,
+    status: Status,
 }
+
+// To skip unecesarry unifications we track whether checks still has pending inference.
+type Status = u8;
+const STATUS_SATISFIED: Status = 0b00000000;
+const STATUS_UNINFERRED: Status = 0b00000001;
+const STATUS_CHANGED: Status = 0b00000010;
 
 impl<'a> InferenceUnifier<'a> {
     pub fn new(env: &'a mut Environment) -> Self {
         Self {
             env,
-            encountered_uninferred: false,
+            status: STATUS_SATISFIED,
         }
     }
 
@@ -98,7 +107,15 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     pub fn reset_and_is_satisfied(&mut self) -> bool {
-        !std::mem::take(&mut self.encountered_uninferred)
+        std::mem::take(&mut self.status) & STATUS_SATISFIED != 0
+    }
+
+    fn log_pass_status(&self, msg: impl std::fmt::Display) {
+        if (self.status & STATUS_CHANGED) != 0 {
+            info!("{msg} changed type variables")
+        } else if (self.status & STATUS_UNINFERRED) != 0 {
+            trace!("{msg} encountered uninferred type variables")
+        }
     }
 
     fn perform(&mut self, passes: RangeTo<Pass>) {
@@ -125,8 +142,6 @@ impl<'a> InferenceUnifier<'a> {
 
     fn known_applications(&mut self) {
         for appl_key in self.env.applications.keys() {
-            assert!(!self.encountered_uninferred);
-
             let appl = &self.env.applications[appl_key];
 
             if appl.satisfied {
@@ -141,7 +156,7 @@ impl<'a> InferenceUnifier<'a> {
             if parameters.len() != appl.parameters.len() {
                 // To prevent us accidentally ruining this functions inference by
                 // unifying it with an invalid instantiation, we will skip this one.
-                log::info!("parameter length differs, skipping {appl_key:?}");
+                info!("parameter length differs, skipping {appl_key:?}");
                 continue;
             }
 
@@ -149,6 +164,7 @@ impl<'a> InferenceUnifier<'a> {
                 self.unify(*expected, given);
             }
 
+            self.log_pass_status("known_applications");
             self.env.applications[appl_key].satisfied = self.reset_and_is_satisfied();
         }
 
@@ -160,6 +176,7 @@ impl<'a> InferenceUnifier<'a> {
             let check = self.env.assignments[i];
             self.unify(check.lhs, check.rhs);
 
+            self.log_pass_status("known_assignments");
             self.env.assignments[i].satisfied = self.reset_and_is_satisfied();
         }
 
@@ -177,6 +194,7 @@ impl<'a> InferenceUnifier<'a> {
 
             self.unify(ret, appl.ret);
 
+            self.log_pass_status("known_return_types");
             self.env.applications[appl_key].satisfied = self.reset_and_is_satisfied();
         }
 
@@ -191,6 +209,7 @@ impl<'a> InferenceUnifier<'a> {
                 self.unify(expected, given);
             }
 
+            self.log_pass_status("known_same_as_unifications");
             self.env.same_as_unifications[sameas_key].satisfied = self.reset_and_is_satisfied();
         }
 
@@ -199,24 +218,38 @@ impl<'a> InferenceUnifier<'a> {
 
     fn known_record_fields(&mut self) {
         for var in self.env.vars() {
+            let has_fields = &self.env.variables[var].has_fields;
+            if has_fields.is_empty() || has_fields.iter().all(|f| f.satisfied) {
+                continue;
+            }
+
             let Some((name, params)) = self.env.as_record_cloned(var) else {
                 continue;
             };
 
-            for has_field in self.env.get_fields(var) {
-                match record::type_of_field(name, has_field.name) {
-                    Ok(ty) => {
-                        let expected = self.env.instantiate(&params, &ty);
-                        log::info!(
-                            "checking the field assignment {} against instantiated field {expected}",
-                            has_field.field_type
-                        );
-                        self.unify(expected, has_field.field_type);
-                    }
-                    Err(record::Error::RecordNotFound(_) | record::Error::FieldNotFound(_)) => {
-                        break;
-                    }
+            for i in 0..has_fields.len() {
+                let has_field = self.env.variables[var].has_fields[i];
+                if has_field.satisfied {
+                    continue;
                 }
+
+                let expected = match has_field.instantiated_field_type {
+                    Some(ty) => ty,
+                    // TODO: Does it makes more sense to store all the correct field types in the record
+                    // when the VariableInfo::Record is created. That way we don't need to repeat
+                    // the instantiation for each field.
+                    None => match record::type_of_field(name, has_field.name) {
+                        Ok(ty) => self.env.instantiate(&params, &ty),
+                        Err(record::Error::RecordNotFound(_) | record::Error::FieldNotFound(_)) => {
+                            break;
+                        }
+                    },
+                };
+
+                self.unify(expected, has_field.field_type);
+
+                self.log_pass_status("known_record_fields");
+                self.env.variables[var].has_fields[i].satisfied = self.reset_and_is_satisfied();
             }
         }
 
@@ -237,7 +270,7 @@ impl<'a> InferenceUnifier<'a> {
 
             if let Some(name) = record::guess_by_fields(var_data.has_fields.iter().map(|f| f.name))
             {
-                log::info!("inferring {var} to be {name} because of its fields");
+                info!("inferring {var} to be {name} because of its fields");
                 let params = record::type_parameters(name, |_| self.env.unknown()).unwrap();
                 self.env.variables[var].info = VariableInfo::Record(name, params);
             }
@@ -255,7 +288,7 @@ impl<'a> InferenceUnifier<'a> {
                 // If it's applied as a function but its type isn't known, then we assume it *is* a
                 // function and infer it into a function.
                 VariableInfo::Unknown => {
-                    log::info!("inferring {func} to be function");
+                    info!("inferring {func} to be function");
 
                     // Use the types from the first time the function is applied
                     let first = &self.env.applications[ApplicationKey(0)];
@@ -270,6 +303,7 @@ impl<'a> InferenceUnifier<'a> {
                 _ => {}
             }
 
+            self.log_pass_status("less_known_functions");
             self.reset_and_is_satisfied();
         }
 
@@ -279,6 +313,7 @@ impl<'a> InferenceUnifier<'a> {
     fn default_numbers(&mut self) {
         for var in self.env.vars() {
             if let VariableInfo::Numeric = &self.env.variables[var].info {
+                info!("inferring {var} to be default int");
                 self.env.variables[var].info = VariableInfo::default_int();
             }
         }
@@ -296,11 +331,11 @@ impl<'a> InferenceUnifier<'a> {
                     // generic to use instead of inferring unit.
                     VariableSource::Signature => {
                         let generic = self.implicitly_declare_generic();
-                        log::info!("inferring {var} -> {generic}");
+                        info!("inferring {var} -> {generic}");
                         VariableInfo::Generic(generic)
                     }
                     VariableSource::Expression => {
-                        log::info!("inferring {var} -> {{unit}}");
+                        info!("inferring {var} -> {{unit}}");
                         VariableInfo::default_unit_type()
                     }
                 };
@@ -326,7 +361,7 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     fn unify(&mut self, expected: VariableKey, given: VariableKey) {
-        log::trace!("unifying {expected} <> {given}");
+        trace!("unifying {expected} <> {given}");
 
         if expected == given {
             return;
@@ -367,15 +402,15 @@ impl<'a> InferenceUnifier<'a> {
                 }
                 self.unify(exp_ret, ret);
             }
-            [VariableInfo::Numeric, VariableInfo::Numeric] => self.encountered_uninferred = true,
+            [VariableInfo::Numeric, VariableInfo::Numeric] => self.status |= STATUS_UNINFERRED,
             [VariableInfo::Numeric, VariableInfo::Int(size)] => {
-                log::info!("inferring {expected} to be {size}");
-                self.encountered_uninferred = true;
+                info!("inferring {expected} to be {size}");
+                self.status |= STATUS_CHANGED;
                 exp_data.info = VariableInfo::Int(*size);
             }
             [VariableInfo::Int(size), VariableInfo::Numeric] => {
-                log::info!("inferring {given} to be {size}");
-                self.encountered_uninferred = true;
+                info!("inferring {given} to be {size}");
+                self.status |= STATUS_CHANGED;
                 given_data.info = VariableInfo::Int(*size);
             }
             [
@@ -398,7 +433,7 @@ impl<'a> InferenceUnifier<'a> {
             }
 
             // These may become known later, so let's leave it for now
-            [VariableInfo::Unknown, VariableInfo::Unknown] => self.encountered_uninferred = true,
+            [VariableInfo::Unknown, VariableInfo::Unknown] => self.status |= STATUS_UNINFERRED,
 
             [VariableInfo::Unknown, _] => self.infer_directly(expected, given),
             [_, VariableInfo::Unknown] => self.infer_directly(given, expected),
@@ -415,8 +450,8 @@ impl<'a> InferenceUnifier<'a> {
     }
 
     fn infer_directly(&mut self, unknown: VariableKey, known: VariableKey) {
-        log::info!("inferring {unknown} =-> {known}");
-        self.encountered_uninferred = true;
+        info!("inferring {unknown} =-> {:?}", &self.env.variables[known]);
+        self.status |= STATUS_CHANGED;
 
         assert!(matches!(
             self.env.variables[unknown].info,

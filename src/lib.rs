@@ -266,9 +266,12 @@ impl Environment {
 
     pub fn add_field(&mut self, var: VariableKey, name: record::Field) -> VariableKey {
         let field_type = self.unknown();
-        self.variables[var]
-            .has_fields
-            .push(inf::HasField { name, field_type });
+        self.variables[var].has_fields.push(inf::HasField {
+            name,
+            field_type,
+            instantiated_field_type: None,
+            satisfied: false,
+        });
         field_type
     }
 
