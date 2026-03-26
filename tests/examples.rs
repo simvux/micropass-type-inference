@@ -313,9 +313,10 @@ fn article_walk_through() {
 
     // let point = Point(a, 200);
     let [_let_point, x] = {
-        let param = env.unknown();
-        let ret = env.record("Point", [("a", param)].into());
-        let func = env.function(vec![param, param], ret);
+        let (forall, fields) = env.instantiate_record("Point").unwrap();
+        let func_params = vec![forall["a"], forall["a"]];
+        let func_ret = env.record("Point", forall, fields);
+        let func = env.function(func_params, func_ret);
         let _200 = env.numeric();
 
         let appl = env.apply(func);

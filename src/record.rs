@@ -35,36 +35,30 @@ pub fn type_of_field(name: Name, field: Field) -> Result<KnownType, Error> {
 }
 
 /// For illustrative purposes we oversimplify name resolution
+pub fn fields_of(name: Name) -> Option<&'static [Field]> {
+    match name {
+        "Pair" => Some(&["first", "second"]),
+        "Point" => Some(&["x", "y"]),
+        "Labeled" => Some(&["id", "label", "value"]),
+        _ => None,
+    }
+}
+
+/// For illustrative purposes we oversimplify name resolution
 pub fn guess_by_fields<I>(fields: I) -> Option<Name>
 where
     I: Iterator<Item = Field> + Clone,
 {
     let fields = fields.into_iter();
 
-    if ["first", "second"]
-        .iter()
-        .any(|name| fields.clone().any(|n| n == *name))
-    {
-        return Some("Pair");
-    }
-
-    if ["x", "y"]
-        .iter()
-        .any(|name| fields.clone().any(|n| n == *name))
-    {
-        return Some("Point");
-    }
-
-    if ["id", "label", "value"]
-        .iter()
-        .any(|name| fields.clone().any(|n| n == *name))
-    {
-        return Some("Labeled");
-    }
-
-    None
+    ["Pair", "Point", "Labeled"].into_iter().find(|record| {
+        fields_of(record)
+            .iter()
+            .any(|record_fields| fields.clone().any(|field| record_fields.contains(&field)))
+    })
 }
 
+/// Map the type parameters of a record declaration
 pub fn type_parameters<T>(
     name: Name,
     mut f: impl FnMut(GenericName) -> T,

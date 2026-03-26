@@ -1,39 +1,20 @@
-use super::{Environment, Forall, GenericName, KnownType, VariableKey};
+use super::{Environment, Forall, GenericName, KnownType, VariableKey, record};
+use std::collections::HashMap;
 
 impl Environment {
-    /// Instantiate a function
-    pub fn instantiate_function(
-        &mut self,
-        generics: impl IntoIterator<Item = GenericName>,
-        params: &[KnownType],
-        ret: &KnownType,
-    ) -> VariableKey {
-        let annotation = generics
-            .into_iter()
-            .map(|name| (name, self.unknown()))
-            .collect();
-
-        let params = params
-            .iter()
-            .map(|ty| self.instantiate(&annotation, ty))
-            .collect();
-
-        let ret = self.instantiate(&annotation, ret);
-
-        self.function(params, ret)
-    }
-
     /// Convert a known type into a type variable in the environment while mapping generics to
     /// their annotated types.
     pub fn instantiate(&mut self, annotation: &Forall<VariableKey>, ty: &KnownType) -> VariableKey {
         let var = match ty {
             KnownType::Record(name, params) => {
-                let params = params
+                let forall = params
                     .iter()
                     .map(|(name, ty)| (*name, self.instantiate(annotation, ty)))
                     .collect();
 
-                self.record(*name, params)
+                let fields = self.instantiate_fields(name, &forall);
+
+                self.record(*name, forall, fields)
             }
             KnownType::List(inner_type) => {
                 let inner_type = self.instantiate(annotation, &inner_type);
@@ -69,6 +50,52 @@ impl Environment {
         log::info!("instantiated {ty} -> {var}");
 
         var
+    }
+
+    pub fn instantiate_record(
+        &mut self,
+        record: record::Name,
+    ) -> Option<(Forall<VariableKey>, HashMap<record::Field, VariableKey>)> {
+        let forall = record::type_parameters(record, |_| self.unknown()).ok()?;
+        let fields = self.instantiate_fields(record, &forall);
+        Some((forall, fields))
+    }
+
+    pub fn instantiate_fields(
+        &mut self,
+        record: record::Name,
+        forall: &Forall<VariableKey>,
+    ) -> HashMap<record::Field, VariableKey> {
+        record::fields_of(record)
+            .expect("record is declared but does not have any fields")
+            .iter()
+            .map(|&field| {
+                let ty = record::type_of_field(record, field).unwrap();
+                (field, self.instantiate(forall, &ty))
+            })
+            .collect()
+    }
+
+    /// Instantiate a function
+    pub fn instantiate_function(
+        &mut self,
+        generics: impl IntoIterator<Item = GenericName>,
+        params: &[KnownType],
+        ret: &KnownType,
+    ) -> VariableKey {
+        let annotation = generics
+            .into_iter()
+            .map(|name| (name, self.unknown()))
+            .collect();
+
+        let params = params
+            .iter()
+            .map(|ty| self.instantiate(&annotation, ty))
+            .collect();
+
+        let ret = self.instantiate(&annotation, ret);
+
+        self.function(params, ret)
     }
 }
 

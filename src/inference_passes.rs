@@ -36,7 +36,6 @@ pub(crate) enum SameasMain {
 pub(crate) struct HasField {
     pub(crate) name: record::Field,
     pub(crate) field_type: VariableKey,
-    pub(crate) instantiated_field_type: Option<VariableKey>,
     pub(crate) satisfied: bool,
 }
 
@@ -223,7 +222,7 @@ impl<'a> InferenceUnifier<'a> {
                 continue;
             }
 
-            let Some((name, params)) = self.env.as_record_cloned(var) else {
+            let Some(fields) = self.env.get_record_fields(var) else {
                 continue;
             };
 
@@ -233,17 +232,8 @@ impl<'a> InferenceUnifier<'a> {
                     continue;
                 }
 
-                let expected = match has_field.instantiated_field_type {
-                    Some(ty) => ty,
-                    // TODO: Does it makes more sense to store all the correct field types in the record
-                    // when the VariableInfo::Record is created. That way we don't need to repeat
-                    // the instantiation for each field.
-                    None => match record::type_of_field(name, has_field.name) {
-                        Ok(ty) => self.env.instantiate(&params, &ty),
-                        Err(record::Error::RecordNotFound(_) | record::Error::FieldNotFound(_)) => {
-                            break;
-                        }
-                    },
+                let Some(expected) = fields.get(has_field.name).copied() else {
+                    continue;
                 };
 
                 self.unify(expected, has_field.field_type);
@@ -271,8 +261,8 @@ impl<'a> InferenceUnifier<'a> {
             if let Some(name) = record::guess_by_fields(var_data.has_fields.iter().map(|f| f.name))
             {
                 info!("inferring {var} to be {name} because of its fields");
-                let params = record::type_parameters(name, |_| self.env.unknown()).unwrap();
-                self.env.variables[var].info = VariableInfo::Record(name, params);
+                let (forall, fields) = self.env.instantiate_record(name).unwrap();
+                self.env.variables[var].info = VariableInfo::Record(name, forall, fields);
             }
         }
 
@@ -377,8 +367,8 @@ impl<'a> InferenceUnifier<'a> {
                 VariableInfo::Generic(got_prim),
             ] if exp_prim == got_prim => {}
             [
-                VariableInfo::Record(exp_ident, exp_params),
-                VariableInfo::Record(given_ident, given_params),
+                VariableInfo::Record(exp_ident, exp_params, _),
+                VariableInfo::Record(given_ident, given_params, _),
             ] if given_ident == exp_ident => {
                 let (exp_params, given_params) = (exp_params.clone(), given_params.clone());
 

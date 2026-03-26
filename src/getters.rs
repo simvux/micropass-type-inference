@@ -1,6 +1,7 @@
 //! Helper methods for iterating and getting information from a type environment
 
-use super::{Environment, Forall, SameasUnificationKey, VariableInfo, VariableKey, inf, record};
+use super::{Environment, SameasUnificationKey, VariableInfo, VariableKey, inf, record};
+use std::collections::HashMap;
 
 impl Environment {
     pub(crate) fn vars(&self) -> impl Iterator<Item = VariableKey> + 'static {
@@ -35,12 +36,12 @@ impl Environment {
         }
     }
 
-    pub(crate) fn as_record_cloned(
+    pub(crate) fn get_record_fields(
         &self,
         var: VariableKey,
-    ) -> Option<(record::Name, Forall<VariableKey>)> {
+    ) -> Option<HashMap<record::Field, VariableKey>> {
         match &self.variables[var].info {
-            VariableInfo::Record(name, params) => Some((name, params.clone())),
+            VariableInfo::Record(_, _, fields) => Some(fields.clone()),
             _ => None,
         }
     }

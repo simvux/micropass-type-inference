@@ -46,7 +46,7 @@ impl<'a> Finalizer<'a> {
 
                 KnownType::Tuple(elems)
             }
-            VariableInfo::Record(name, params) => {
+            VariableInfo::Record(name, params, _) => {
                 let name = *name;
                 let params = params
                     .clone()

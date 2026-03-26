@@ -64,7 +64,11 @@ impl Variable {
 enum VariableInfo {
     Unknown,
     Numeric,
-    Record(record::Name, Forall<VariableKey>),
+    Record(
+        record::Name,
+        Forall<VariableKey>,
+        HashMap<record::Name, VariableKey>,
+    ),
     Tuple(Vec<VariableKey>),
     List(VariableKey),
     Generic(GenericName),
@@ -221,11 +225,12 @@ impl Environment {
     pub fn record(
         &mut self,
         name: record::Name,
-        params: HashMap<GenericName, VariableKey>,
+        params: Forall<VariableKey>,
+        fields: HashMap<record::Field, VariableKey>,
     ) -> VariableKey {
         self.variables.push(Variable::new(
             self.current_source,
-            VariableInfo::Record(name, params),
+            VariableInfo::Record(name, params, fields),
         ))
     }
 
@@ -269,7 +274,6 @@ impl Environment {
         self.variables[var].has_fields.push(inf::HasField {
             name,
             field_type,
-            instantiated_field_type: None,
             satisfied: false,
         });
         field_type
