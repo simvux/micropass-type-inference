@@ -301,6 +301,86 @@ fn exemplatory() {
 }
 
 #[test]
+fn article_walk_through() {
+    logger();
+    let mut env = Environment::new();
+
+    let a = env.unknown();
+    let _b = env.unknown();
+    let return_ = env.unknown();
+
+    env.leave_signature_enter_expression();
+
+    // let point = Point(a, 200);
+    let [_let_point, x] = {
+        let param = env.unknown();
+        let ret = env.record("Point", [("a", param)].into());
+        let func = env.function(vec![param, param], ret);
+        let _200 = env.numeric();
+
+        let appl = env.apply(func);
+        env.apply_next_parameter(appl, a);
+        env.apply_next_parameter(appl, _200);
+
+        let point = env.get_return_type(appl);
+
+        let let_point = env.unknown();
+        env.assign(point, let_point);
+        let x = env.add_field(let_point, "x");
+
+        [let_point, x]
+    };
+
+    // let list = [point.x, 300];
+    {
+        let list_literal = {
+            let (same_as, list, _elem) = env.list_sameas();
+            let _300 = env.numeric();
+            env.add_sameas_member(same_as, x);
+            env.add_sameas_member(same_as, _300);
+            list
+        };
+
+        let list = env.unknown();
+        env.assign(list_literal, list);
+        list
+    };
+
+    // let record = { x = 100, y = 200 };
+    let [_let_record, y] = {
+        let record = env.unknown();
+        let _100 = env.numeric();
+        let _200 = env.numeric();
+        let x = env.add_field(record, "x");
+        let y = env.add_field(record, "y");
+        env.assign(_100, x);
+        env.assign(_200, y);
+
+        let let_record = env.unknown();
+        env.assign(record, let_record);
+        [let_record, y]
+    };
+
+    // point.y == record.y
+    let comparison = {
+        let bool = env.i(8);
+        let param = env.unknown();
+        let func = env.function(vec![param, param], bool);
+
+        let appl = env.apply(func);
+        env.apply_next_parameter(appl, x);
+        env.apply_next_parameter(appl, y);
+        env.get_return_type(appl)
+    };
+
+    // return point == { x = 100, y = 200 };
+    env.assign(comparison, return_);
+
+    println!("{}", process(env, vec![]));
+    panic!();
+}
+
+#[test]
 #[ignore]
 fn bench() {
     let time = std::time::Instant::now();
