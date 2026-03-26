@@ -217,22 +217,22 @@ impl<'a> InferenceUnifier<'a> {
 
     fn known_record_fields(&mut self) {
         for var in self.env.vars() {
-            let has_fields = &self.env.variables[var].has_fields;
-            if has_fields.is_empty() || has_fields.iter().all(|f| f.satisfied) {
+            let has_fields = self.env.has_fields(var);
+            if has_fields.iter().all(|has_field| has_field.satisfied) {
                 continue;
             }
 
-            let Some(fields) = self.env.get_record_fields(var) else {
-                continue;
-            };
-
             for i in 0..has_fields.len() {
-                let has_field = self.env.variables[var].has_fields[i];
+                let has_field = self.env.has_fields(var)[i];
                 if has_field.satisfied {
                     continue;
                 }
 
-                let Some(expected) = fields.get(has_field.name).copied() else {
+                let Some(known_fields) = self.env.get_record_fields(var) else {
+                    break;
+                };
+
+                let Some(expected) = known_fields.get(has_field.name).copied() else {
                     continue;
                 };
 

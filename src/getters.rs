@@ -39,10 +39,14 @@ impl Environment {
     pub(crate) fn get_record_fields(
         &self,
         var: VariableKey,
-    ) -> Option<HashMap<record::Field, VariableKey>> {
+    ) -> Option<&HashMap<record::Field, VariableKey>> {
         match &self.variables[var].info {
-            VariableInfo::Record(_, _, fields) => Some(fields.clone()),
+            VariableInfo::Record(_, _, fields) => Some(fields),
             _ => None,
         }
+    }
+
+    pub(crate) fn has_fields(&self, var: VariableKey) -> &[inf::HasField] {
+        &self.variables[var].has_fields
     }
 }
