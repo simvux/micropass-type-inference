@@ -243,65 +243,106 @@ fn defaulting() {
 }
 
 #[test]
-fn exemplatory() {
+fn article_showcase_example() {
+    println!("{}", article_showcase_example_go());
+}
+
+#[test]
+#[ignore]
+fn inspect_article_showcase_example() {
+    panic!("{}", article_showcase_example_go());
+}
+
+fn article_showcase_example_go() -> Map<VariableKey, KnownType> {
     logger();
     let mut env = Environment::new();
-
-    let v0 = env.unknown();
-    let v1 = env.unknown();
+    let param0 = env.unknown();
+    let param1 = env.i(32);
+    let return_ = {
+        let forall = [("a", env.string())].into();
+        let fields = env.instantiate_fields("Just", &forall);
+        env.record("Just", forall, fields)
+    };
     env.leave_signature_enter_expression();
 
-    // let _ = if something() { v0 } else { v1 }
-    let _implied_same = {
-        let (same_as, expr) = env.expr_sameas();
-        env.add_sameas_member(same_as, v0);
-        env.add_sameas_member(same_as, v1);
-        expr
+    // let z = {
+    let z = {
+        // let n = 4;
+        let n = env.numeric();
+
+        // let fst(param0, { x = n, y = n });
+
+        let fst = env.instantiate_function(
+            ["T", "U"],
+            &[T::Generic("T"), T::Generic("U")],
+            &T::Generic("T"),
+        );
+
+        let record = {
+            let var = env.unknown();
+            let x = env.add_field(var, "x");
+            let y = env.add_field(var, "y");
+
+            env.assign(n, x);
+            env.assign(n, y);
+
+            var
+        };
+
+        let appl = env.apply(fst);
+        env.apply_next_parameter(appl, param0);
+        env.apply_next_parameter(appl, record);
+
+        env.get_return_type(appl)
     };
 
-    // let _ = [v1, get_string()];
-    //   where
-    //     fn get_string() -> string {...}
-    let _implied_string = {
-        let (same_as, list, _) = env.list_sameas();
-        env.add_sameas_member(same_as, v0);
-        let get_string = {
-            let string = env.string();
-            let func = env.function(vec![], string);
-
-            let application = env.apply(func);
-            env.get_return_type(application)
-        };
-        env.add_sameas_member(same_as, get_string);
+    // let _ = [z, param1];
+    let _ = {
+        let (sameas_key, list, _) = env.list_sameas();
+        env.add_sameas_member(sameas_key, z);
+        env.add_sameas_member(sameas_key, param1);
         list
     };
 
-    // let paired: (i32, i32) = (v0, v0);
-    let _paired = {
-        let i32 = env.i(32);
-        let lhs = env.tuple(vec![i32, i32]);
+    // Maybe::Just(param0);
+    let just = {
+        let constructor = env.instantiate_function(
+            ["a"],
+            &[T::Generic("a")],
+            &T::Record("Just", [("a", T::Generic("a"))].into()),
+        );
 
-        let rhs = env.tuple(vec![v0, v0]);
-        env.assign(rhs, lhs);
+        let appl = env.apply(constructor);
+        env.apply_next_parameter(appl, param0);
 
-        lhs
+        env.get_return_type(appl)
     };
 
-    let expected_return_type = env.i(32);
-    env.assign(v0, expected_return_type);
+    // return Maybe::Just(param0);
+    env.assign(just, return_);
 
     process(
         env,
         vec![Error::Mismatch {
-            expected: T::i(32),
-            given: T::string(),
+            expected: T::string(),
+            given: T::default_int(),
             message: "type must be same as the other types of this list".into(),
         }],
-    );
+    )
 }
 
 #[test]
-fn article_walk_through() {
+fn article_feature_complete_example() {
+    println!("{}", article_feature_complete_example_go());
+}
+
+#[test]
+#[ignore]
+fn inspect_article_feature_complete_example() {
+    panic!("{}", article_feature_complete_example_go());
+}
+
+fn article_feature_complete_example_go() -> Map<VariableKey, KnownType> {
     logger();
     let mut env = Environment::new();
 
@@ -377,8 +418,7 @@ fn article_walk_through() {
     // return point == { x = 100, y = 200 };
     env.assign(comparison, return_);
 
-    println!("{}", process(env, vec![]));
-    panic!();
+    process(env, vec![])
 }
 
 #[test]
@@ -390,7 +430,8 @@ fn bench() {
         list();
         if_expr();
         field_inference();
-        exemplatory();
+        article_feature_complete_example_go();
+        article_showcase_example_go();
         static_function_application();
         generic_function_application();
     }

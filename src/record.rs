@@ -30,6 +30,10 @@ pub fn type_of_field(name: Name, field: Field) -> Result<KnownType, Error> {
             "value" => Ok(KnownType::Generic("a")),
             _ => Err(Error::FieldNotFound(field)),
         },
+        "Just" => match field {
+            "v" => Ok(KnownType::Generic("a")),
+            _ => Err(Error::FieldNotFound(field)),
+        },
         _ => Err(Error::RecordNotFound(name)),
     }
 }
@@ -40,6 +44,7 @@ pub fn fields_of(name: Name) -> Option<&'static [Field]> {
         "Pair" => Some(&["first", "second"]),
         "Point" => Some(&["x", "y"]),
         "Labeled" => Some(&["id", "label", "value"]),
+        "Just" => Some(&["v"]),
         _ => None,
     }
 }
@@ -51,11 +56,13 @@ where
 {
     let fields = fields.into_iter();
 
-    ["Pair", "Point", "Labeled"].into_iter().find(|record| {
-        fields_of(record)
-            .iter()
-            .any(|record_fields| fields.clone().any(|field| record_fields.contains(&field)))
-    })
+    ["Pair", "Point", "Labeled", "Just"]
+        .into_iter()
+        .find(|record| {
+            fields_of(record)
+                .iter()
+                .any(|record_fields| fields.clone().any(|field| record_fields.contains(&field)))
+        })
 }
 
 /// Map the type parameters of a record declaration
@@ -67,6 +74,7 @@ pub fn type_parameters<T>(
         "Pair" => ["a", "b"].as_slice(),
         "Point" => ["a"].as_slice(),
         "Labeled" => ["a"].as_slice(),
+        "Just" => ["a"].as_slice(),
         _ => return Err(Error::RecordNotFound(name)),
     };
 
