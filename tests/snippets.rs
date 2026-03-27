@@ -357,7 +357,7 @@ fn article_feature_complete_example_go() -> Map<VariableKey, KnownType> {
         let (forall, fields) = env.instantiate_record("Point").unwrap();
         let func_params = vec![forall["a"], forall["a"]];
         let func_ret = env.record("Point", forall, fields);
-        let func = env.function(func_params, func_ret);
+        let func = env.function(func_params.clone(), func_ret);
         let _200 = env.numeric();
 
         let appl = env.apply(func);
@@ -436,7 +436,5 @@ fn bench() {
         generic_function_application();
     }
 
-    println!("took {:#?}", time.elapsed());
-
-    panic!();
+    panic!("took {:#?}", time.elapsed());
 }
