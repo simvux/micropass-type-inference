@@ -2,7 +2,7 @@
 
 Experimental type checking and inference algorithm which splits inference into small passes ordered by user relevance, reruns earlier passes whenever new information appears, and attempts to emit errors which match the developers thought process as closely as possible.
 
-The repository is meant to accompany [`this article`](). (NOTE: Article not yet publicised)
+The repository is meant to accompany [`this article`](https://articles.luminalang.com/a/micropass-inference/).
 
 ![Feature Complete Example](./img/feature-complete-example.rs.webp)
 
@@ -38,9 +38,10 @@ Instead of one large unification pass, inference is split into ordered passes in
 
 With this ordering the higher up the list you go the closer to the users thought process you are. This way types are inferred by what the user is likely to consider the most important rather than by their position in source code.
 
-Each pass performs its minimal task leaving most types untouched. After a pass is ran, it re-runs all previous passes before it. Hoping the changes it made will facilitate earlier passes to perform their role. With this design it's logical that the lower down the list you go the more destructive passes are allowed to be. As its implied that less type information is available.
+Each pass performs its minimal task leaving most types untouched. After a pass is completed, it re-runs all previous passes before it. Hoping the changes it made will facilitate earlier passes to perform their role. With this design it’s logical that the lower down the list you go the more aggressive passes are allowed to be with their inference. As its implied less new type information will be made available.
 
-Since each type variable may be unified many times by the same pass, error generation is not reasonably able to work during inference. Therefore passes ignore errors and only touch the types it knows it can and should work with. Type checking is instead deligated to its own step which acts upon entirely static types. This has the additional benefit of avoiding additional complexity during unification.
+Since each type variable may be unified many times by the same pass, error generation is not reasonably able to work during inference. Therefore passes ignore errors and only touch the types it knows it can and should work with. Error generation is instead deligated to type checking.
+
 
 ## Example
 
@@ -89,19 +90,11 @@ fn generic_function_application() {
 
 ## Concerns
 
-While results are extremely promising, the real concern with this approach is its innate quadratic complexity.
-
-Performance can be drastically improved in various ways
-
-- Marking type variables as "dirty" when they're affected by inference
-- Skipping passes when no change relevant to them has been made
-- Using arenas to allow zero-allocating inference passes
-
-However the quadratic complexity does completely rule out the possibility of scaling the type environment over translation units instead of functions, and limits its use in languages where fewer large functions are common. 
+While results are extremely promising, the concern with this approach is its innate quadratic complexity.
 
 ## Suggested Study Order
 
-1. [`tests/examples.rs`](tests/examples.rs)
+1. [`tests/snippets.rs`](tests/snippets.rs)
 2. [`src/inference_passes.rs`](src/inference_passes.rs) (what makes this project unique)
 3. [`src/lib.rs`](src/lib.rs) (type environment and constructors)
 4. [`src/checker.rs`](src/checker.rs)
