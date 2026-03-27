@@ -4,6 +4,8 @@ Experimental type checking and inference algorithm which splits inference into s
 
 The repository is meant to accompany [`this article`](). (NOTE: Article not yet publicised)
 
+![Feature Complete Example](./img/feature-complete-example.rs.webp)
+
 ## Scope
 
 This crate is not meant to be used as a library, but rather as the example of the idea which you may build on top on. 
