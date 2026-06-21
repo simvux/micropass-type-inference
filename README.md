@@ -1,3 +1,9 @@
+# STATUS
+
+I've discovered a way to recreate the same behaviour with vastly improved performance by constructing a dependency graph of tvars to checks, and then storing all checks in an binary tree. 
+
+This improved version was made inside the Lumina compiler's source tree, and will not be backported to this repository. However; it will eventually be open sourced in [Lumina's github repository](https://github.com/luminalang/lumina)
+
 # Backtracked Micropass Type Inference
 
 Experimental type checking and inference algorithm which splits inference into small passes ordered by user relevance, reruns earlier passes whenever new information appears, and attempts to emit errors which match the developers thought process as closely as possible.
